@@ -49,11 +49,11 @@ exit
 EOF
 echo "Creating service ..."
 svccfg -f $TEMP_FILE
-echo "Done"
+echo "Done."
 fmri=pkg/server:$INSTANCE_NAME
-echo "Enabling ${fmri}"
+echo "Enabling ${fmri} ..."
 svcadm refresh $fmri
 svcadm enable $fmri
-echo "Done"
-rm $TEMP_FILE
+echo "Done."
+rm $TEMP_FILE 2>/dev/null
 exit 0
