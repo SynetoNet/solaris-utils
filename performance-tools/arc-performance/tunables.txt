@@ -1,0 +1,137 @@
+
+I. ARC shrink shift
+====================================================================================================
+Every second a process runs which checks if data can be removed from the ARC and evicts it.
+Default max 1/32nd of the ARC can be evicted at a time. This is limited because evicting
+large amounts of data from ARC stalls all other processes.
+Back when 8GB was a lot of memory 1/32nd meant 256MB max at a time. When you have 196GB of
+memory 1/32nd is 6.3GB, which can cause up to 20-30 seconds of unresponsiveness
+(depending on the record size).
+
+This 1/32nd needs to be changed to make sure the max is set to ~100-200MB again, by adding
+the following to /etc/system:
+set zfs:zfs_arc_shrink_shift=11
+(where 11 is 1/2 11 or 1/2048th, 10 is  1/2 10 or 1/1024th etc.
+Change depending on amount of RAM in your system).
+
+II. L2ARC write boost
+====================================================================================================
+ZFS doesn't know or care where the requests for data come from. Many of the NAS protocols
+(CIFS, AFP, etc) are implemented as userland programs and so appear to be virtually
+identical to MiniDLNA, which is itself a network server, so ... what's the difference again?
+
+First, understand that L2ARC is filled from data that is likely to be evicted from ARC soon;
+there is no value to moving fresher stuff to slower storage, since if it's fresher, it's
+more likely to be accessed again sooner. This means that you need a reasonably-sized ARC,
+because the only way for ZFS to accurately build up a good ARC is to be seeing a fair
+amount of stuff cached to begin with. If you have very bursty traffic that causes massive
+rounds of ARC evictions, you're going to see less-good selections picked for L2ARC because
+the stuff flushed out to L2ARC is basically a few gallons of water out of a firehose
+flow of data. L2ARC is not a good substitute for a decently sized ARC.
+
+L2ARC is populated based on several controls. The ones that you can reasonably affect are
+
+zfs:l2arc_write_boost: 134217728
+zfs:l2arc_write_max: 67108864
+
+These settings both default to, I believe, 8MB, which is 8MB per feed period, which is 1sec
+on FreeNAS. write_max controls how much data per second can be flushed out to your L2ARC device.
+write_boost controls how much is flushed out during the period before ARC is full; this is
+essentially a time where nothing would be reading from L2ARC so you can go a bit heavier on writes.
+Big thing to remember with these tunables, though, is that you can't just say "oh my SSD can
+handle 200MB/sec so I'll set them to 200MB/sec!" because then your SSD won't be able to
+service read requests in a reasonable fashion. You'll see that I've picked 64MB/sec for an
+OCZ Agility 3 60GB; this is about 1/8th its potential write speed.
+
+So anyways, basically what ends up happening is that ZFS picks the older regions of its ARC
+and flushes that out to L2ARC at speeds of no more than l2arc_write_max. You don't want to get
+too aggressive, and you should be aware that it is not designed to instantly cache
+every possible bit of data that it'd be nice to have in L2ARC. The idea is that after things
+have been running awhile, frequently requested stuff ends up in ARC, less common stuff in L2ARC,
+and everything else is pulled from disk.
+
+One minor correction: if you have l2arc_feed_again set to 1, it is possible for the l2arc
+flush to exceed the rate I described above; l2arc_feed_secs is the upper cap and defaults to 1s,
+but there is also l2arc_feed_min_ms which defaults to 200, and it is therefore possible to
+have several "feed_again" events happen quickly back-to-back. Do not set write_max too
+aggressively high unless you understand the dynamics here. The code is reasonably clever and
+will self-manage this assuming you give it reasonable guidance. For workloads here I determined
+that 1/8th of theoretical write capacity, even accelerated through the feed_again process,
+would still not starve read attempts. 1/8th of theoretical write capacity is probably as
+aggressive as one should ever get.
+
+## Increase L2ARC write b/w set to 100MB/s
+set zfs:l2arc_write_max = 104857600
+set zfs:l2arc_write_max = 0x6400000
+
+## Warm-up L2ARC devices more rapidly than usual, b/w is set to 100MB/s
+echo "l2arc_write_boost/Z 0x6400000"|mdb -kw
+echo "l2arc_write_boost/Z 0xC800000"|mdb -kw
+
+## Set number of writers to L2ARC
+echo "l2arc_headroom/W4"|mdb -kw
+
+## Allow for reads to happen from L2ARC while writes are happening
+echo "l2arc_norw/W0t0"|mdb -kw
+
+
+III. Set l2arc_noprefetch=0 if you need to cache large streaming/sequential workloads
+====================================================================================================
+The default value of 1 does not allow caching of streaming and/or sequential workloads.
+Switching it to 0 will allow streaming/sequential reads to be cached.
+## Disable ZFS prefetch in ARC and l2arc
+echo zfs_prefetch_disable/W0t1 | mdb -kw
+echo l2arc_noprefetch/W0t1 | mdb -kw
+
+
+IV. Secondarycache parameter for frequently used data
+====================================================================================================
+Set secondarycache=all only for frequently used data. For example:
+# zfs set secondarycache=all data/frequent-used-data data
+
+
+V. Record Size (volblocksize, recordsize) impact on ARC performance
+====================================================================================================
+The ARC shrink shift setting does not apply when a file gets deleted. When a file gets
+deleted all blocks in ARC which reference that file will be evicted immediately. This can cause
+issues if you delete a large file on a folder with a low record size. For instance: if you create a
+20GB file in a folder where max record size has been set to 4KB, copy that file to another location
+(in effect putting the entire file in ARC if you have a not so busy system with enough memory) and
+then delete that file, there will be 20GB/4KB = 5.2 million blocks deleted from memory. This can
+take up to 56(!) seconds, causing IO throttling and NFS timeouts etc.
+If the record size on that folder would have been 32kb, 8 times less blocks would have to be removed
+(20GB/KB = 0.65 million) which would take ~7 seconds and fits nicely within the TXG timeout values.
+
+In short, if you have a large memory system be careful with setting very small record sizes on the
+folders. Of course tuning record sizes all depends on your workload. The default record size is set
+to 128KB, which would never be a problem when deleting files.
+
+
+VI. What is the superior limit on L2ARC size?
+====================================================================================================
+L2ARC needs approximately 200 bytes per record. I use the following example:
+     Suppose we use a Seagate LP 2 TByte disk for the L2ARC
+             + Disk has 3,907,029,168 512 byte sectors, guaranteed
+             + Workload uses 8 kByte fixed record size
+     RAM needed for arc_buf_hdr entries
+             + Need = ~(3,907,029,168 - 9,232) * 200 / 16 = ~48 GBytes
+
+Don't underestimate the RAM needed for large L2ARCs.
+
+
+V. ARC Tunables:
+====================================================================================================
+vfs.zfs.l2arc_write_max: 8388608    # Maximum number of bytes written to l2arc per feed
+vfs.zfs.l2arc_write_boost: 8388608  # Mostly only relevant at the first few hours after boot
+vfs.zfs.l2arc_headroom: 2           # Not sure
+vfs.zfs.l2arc_feed_secs: 1          # l2arc feeding period
+vfs.zfs.l2arc_feed_min_ms: 200      # minimum l2arc feeding period
+vfs.zfs.l2arc_noprefetch: 1         # control whether streaming data is cached or not
+vfs.zfs.l2arc_feed_again: 1         # control whether feed_min_ms is used or not
+vfs.zfs.l2arc_norw: 1               # no read and write at the same time
+
+
+VI. Further reading:
+====================================================================================================
+http://dtrace.org/blogs/brendan/2008/07/22/zfs-l2arc
+http://mirror-admin.blogspot.ro/2011/12/how-l2arc-works.html

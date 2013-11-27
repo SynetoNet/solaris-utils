@@ -1,0 +1,37 @@
+
+root@storage:~# echo ::spa | mdb -k
+ADDR                 STATE NAME
+ffffff04e6dfb040    ACTIVE rpool
+ffffff04e98f5580    ACTIVE tank
+
+root@storage:~# echo ffffff04e98f5580::zfs_blkstats | mdb -k
+Dittoed blocks on same vdev: 8192
+
+Blocks  LSIZE   PSIZE   ASIZE     avg    comp   %Total  Type
+     1     1K     512   1.50K   1.50K    2.00     0.00  object directory
+     5  2.50K   2.50K   7.50K   1.50K    1.00     0.00  object array
+     2    32K   17.0K   51.0K   25.5K    1.88     0.00  packed nvlist
+ 3.33K   415M   46.3M    139M   41.7K    8.95     0.19  bpobj
+ 16.9K  70.3M   57.7M    173M   10.1K    1.21     0.24  SPA space map
+ 1.35K  21.6M   1.99M   4.56M   3.37K   10.80     0.00  DMU dnode
+   151   302K   75.5K    151K      1K    4.00     0.00  DMU objset
+    28  46.0K   16.5K   49.5K   1.76K    2.78     0.00  DSL directory child map
+    31   149K   38.0K    114K   3.67K    3.92     0.00  DSL dataset snap map
+    41   455K   56.0K    168K   4.09K    8.11     0.00  DSL props
+  556K  68.9G   68.8G   68.8G    127K    1.00    99.53  ZFS plain file
+    91   335K   65.5K    131K   1.43K    5.11     0.00  ZFS directory
+     3  3.00K   1.50K   3.00K      1K    2.00     0.00  ZFS master node
+     3  1.50K   1.50K   3.00K      1K    1.00     0.00  ZFS delete queue
+    57  7.01M   2.16M   6.48M    116K    3.24     0.00  SPA history
+     1    512     512   1.50K   1.50K    1.00     0.00  Pool properties
+     1    16K      1K      2K      2K   16.00     0.00  FUID table
+    35  19.0K   17.5K   52.5K   1.50K    1.08     0.00  DSL dataset next clones
+   302   297K    151K    302K      1K    1.96     0.00  ZFS user/group used
+     2     1K      1K      2K      1K    1.00     0.00  SA master node
+     2  3.00K      1K      2K      1K    3.00     0.00  SA attr registration
+     4    64K   7.00K   14.0K   3.50K    9.14     0.00  SA attr layouts
+   729  7.94M   1.10M   3.32M   4.66K    7.17     0.00  DSL deadlist map
+     6  4.50K   3.00K   9.00K   1.50K    1.50     0.00  DSL dir clones
+    15  1.87M   67.5K    203K   13.5K   28.44     0.00  bpobj subobj
+     4  33.0K   4.50K   13.5K   3.37K    7.33     0.00  other
+  579K  69.4G   68.9G   69.2G    122K    1.00    100.0  Total

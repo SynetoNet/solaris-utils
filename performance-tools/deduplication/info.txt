@@ -1,0 +1,10 @@
+
+http://www.c0t0d0s0.org/archives/7271-ZFS-Dedup-Internals.html
+
+## Monitor arc_meta_used
+while :; do echo ::arc|mdb -k|grep arc_meta_used; sleep 15; done
+
+li=$(printf "%40s\n" " "|tr " " "x"); while :; do echo $li; date "+%c"; echo $li; echo ::arc|mdb -k|egrep '^p |^c |^size|arc_meta'; echo $li; sleep 5; done
+
+## Log arc_meta usage
+for i in {0..10}; do echo $(date +"%c"); echo ::arc|mdb -k|grep arc_meta; sleep 20; done >> /tmp/arc-usage-$(hostname).log

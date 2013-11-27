@@ -1,0 +1,54 @@
+
+## Watch ARC
+dtrace -n 'sdt:::arc-delete,sdt:::arc-evict,sdt:::arc-hit,sdt:::arc-miss { @[probefunc] = count(); }'
+
+## Observe memory throttle events
+dtrace -qn 'fbt:zfs:arc_memory_throttle:entry /self->ct = 0/ { self->ct++; } tick-5sec {printf("%d : %d\n",walltimestamp/1000000,self->ct); }'
+
+## Amount of time in arc_adjust function
+dtrace -qn 'fbt:zfs:arc_adjust:entry { self->start = timestamp; } fbt:zfs:arc_adjust:return {@[walltimestamp,"Time(ms):"] = sum(timestamp - self->start); } tick-1sec {normalize(@,1000); printa("%-24Y %s %@d\n",@); trunc(@); }'
+
+## Distribution of blocksizes for blocks added to ARC
+dtrace -n 'fbt:zfs:arc_buf_add_ref:entry {@t = quantize(args[0]->b_hdr->b_size); }'
+
+## Measure how quickly checksums are being calculated
+dtrace -n 'fbt:zfs:arc_cksum_verify:entry { self->start =timestamp; } fbt:zfs:arc_cksum_verify:return {@["Time us:"] = quantize(timestamp - self->start); }'
+
+## Data vs. Metadata hits and misses in ARC
+dtrace -n 'sdt:zfs::arc-hit,sdt:zfs::arc-miss { @b["bytes"] = quantize(((arc_buf_hdr_t *)arg0)->b_size); } sdt:zfs::arc-hit,sdt:zfs::arc-miss { @t["type"] = quantize(((arc_buf_hdr_t *)arg0)->b_type); }'
+
+## Same as above, with formatted output and a tick-1sec probe
+dtrace -qn 'sdt:zfs::arc-hit,sdt:zfs::arc-miss { @b["bytes"] = quantize(((arc_buf_hdr_t *)arg0)->b_size); } sdt:zfs::arc-hit,sdt:zfs::arc-miss { @t["type"] = quantize(((arc_buf_hdr_t *)arg0)->b_type);} tick-1sec { printf("%Y\n", walltimestamp); printa("\n   Bytes: %@d\n", @b); printa("\n   Type(0->data, 1->metadata): %@d\n", @t); clear(@b); clear(@t); }'
+
+## Accesses into the ARC
+dtrace -n 'fbt:zfs:arc_access:entry {@[args[0]->b_type,args[0]->b_size,args[0]->b_birth] = count();} tick-1sec {printa(@); clear(@);}'
+
+## Quantize by size of arc buffer, and split into "Data" and "Metadata"
+dtrace -n '::arc_access:entry { @[args[0]->b_type == 1 ? "Medatadata" : "Data" ] = quantize(args[0]->b_size)} '
+
+## Check for arc shrink events
+dtrace -n 'fbt::arc_shrink:* { @[probefunc, stack()] = count(); }'
+
+## Observe ARC shrink events
+dtrace -n '::arc_shrink:entry {@st[probefunc] =count(); printf("%Y\n", walltimestamp)} END{ trunc(@st); exit(0)}'
+dtrace -n '::arc_shrink:entry {@st[probefunc, stack()] =count(); printf("%Y\n", walltimestamp)} END{ printa(@st); exit(0)}'
+
+dtrace -n '::arc_shrink:entry {@st[probefunc, stack()] =count()} tick-5sec {printf("%Y\n", walltimestamp); printa(@st); printf("%s\n", ""); trunc(@st)}'
+
+dtrace -n 'fbt:zfs:arc_reclaim_needed:return /args[1]/ { printf("%Y   return=%d\n", walltimestamp, args[1]); } fbt:zfs:arc_shrink:entry {printf("%Y\n", walltimestamp);
+
+## Run these two together on two screens
+dtrace -n 'fbt:zfs:arc_reclaim_needed:return /args[1]/ { printf("%Y :: return=%d\n", walltimestamp, args[1]); } fbt:zfs:arc_shrink:return {@[probefunc, args[0] ] = count(); printf("%Y :: return=%d\n", walltimestamp,args[0]);}'
+li=$(printf "%40s\n" " "|tr " " "x"); while :; do echo $li; date "+%c"; echo $li; echo ::arc|mdb -k|egrep '^p |^c |^size|arc_meta'; echo $li; sleep 5; done
+
+## Observe arc_adapt events
+dtrace -n 'fbt::arc_adapt:entry { self->bytes = args[0]; @[stack(),args[0],args[1]->arcs_size] = count(); } fbt::arc_adapt:entry /self->bytes != 0/ {printf("%Y Adjust by %d Kb", walltimestamp, self->bytes/1024); self->bytes = 0; } END{trunc(@,5); }'
+
+dtrace -n 'fbt::arc_adapt:entry { self->size = args[1]->arcs_size; self->bytes = args[0]; @[execname,stack(),args[0],args[1]->arcs_size] = count(); } fbt::arc_adapt:entry /self->bytes != 0/ {@s = quantize(self->bytes); } END {trunc(@,4); }'
+
+## Watch time taken by ARC evicts and entry to ghost list
+dtrace -n 'fbt::arc_evict:entry {this->ts=timestamp} fbt::arc_evict:return /this->ts/{@a=count();t=timestamp-this->ts;@b=sum(t)}'
+dtrace -n 'fbt::arc_evict_ghost:entry {this->ts=timestamp} fbt::arc_evict_ghost:return /this->ts/{@a=count();t=timestamp-this->ts;@b=sum(t)}'
+
+## Calculate percentage of hits vs. misses against demand data from ARC
+python -c "print '%1.2f' % (100 - (float($(kstat -p zfs:0:arcstats:demand_data_misses|cut -f2)) / float($(kstat -p zfs:0:arcstats:demand_data_hits|cut -f2)) * 100))"

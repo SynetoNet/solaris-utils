@@ -1,0 +1,2 @@
+http://broken.net/uncategorized/zfs-performance-tuning-for-scrubs-and-resilvers/
+http://src.illumos.org/source/xref/illumos-gate/usr/src/uts/common/fs/zfs/dsl_scan.c#61
