@@ -1,0 +1,169 @@
+#!/usr/bin/bash
+# The MIT License (MIT)
+#
+# Copyright (c) 2013, S.C. Syneto S.R.L.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy of
+# this software and associated documentation files (the "Software"), to deal in
+# the Software without restriction, including without limitation the rights to
+# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+# the Software, and to permit persons to whom the Software is furnished to do so,
+# subject to the following conditions:
+# 
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+# 
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+#
+
+LOGDIR=samples/`date '+%y-%m-%d/%H:%M:%S'`
+mkdir -p $LOGDIR
+
+declare -a TASKS
+
+echo "Checking dependencies ..."
+if ! pkg info system/header >/dev/null 2>&1; then
+	echo "Installing dependencies ..."
+	pkg install -v system/header
+fi
+
+echo "Gathering USE metrics:"
+################################################################################
+# CPU metrics:
+################################################################################
+echo " => CPU utilization: system-wide"
+vmstat 10 2 | awk '{print $22}' > ${LOGDIR}/cpu-utilization-1systemwide.txt &
+TASKS+=($!)
+
+echo " => CPU utilization: per CPU"
+mpstat 1 11 | awk '{print $1 " " $16}' > ${LOGDIR}/cpu-utilization-2percpu.txt &
+TASKS+=($!)
+
+echo " => CPU utilization: per process"
+prstat -c 1 11 | awk '{print $1 " " $10 " " $9}' | grep -v ^Total > ${LOGDIR}/cpu-utilization-3perprocess.txt &
+TASKS+=($!)
+
+echo " => CPU utilization: per kernel thread"
+lockstat -I sleep 10 > ${LOGDIR}/cpu-utilization-4kerneltrhead.txt &
+TASKS+=($!)
+
+echo " => CPU utilization: system-wide"
+uptime > ${LOGDIR}/cpu-saturation-1systemwide.txt &
+TASKS+=($!)
+
+echo " => CPU saturation: dispatcher queue length"
+lib/dispqlen.d > ${LOGDIR}/cpu-saturation-2dispqlen.txt &
+TASKS+=($!)
+
+echo " => CPU saturation: percentage of time the process has spent waiting for CPU"
+prstat -mLc 1 11 | awk '{print $1 " " $15 " " $10}' | grep -v ^Total > ${LOGDIR}/cpu-saturation-3percentcpuwait.txt &
+TASKS+=($!)
+
+
+################################################################################
+# Memory metrics:
+################################################################################
+echo " => Memory capacity: system-wide"
+vmstat 1 11 | awk '{print $4 " " $5}' | tail -n 3 > ${LOGDIR}/memory-capacity-1systemwide.txt &
+TASKS+=($!)
+
+echo " => Memory capacity: per process"
+prstat -c 1 11 | awk '{print $3 " " $4 " " $10}' | grep -v '^Total' > ${LOGDIR}/memory-capacity-2perprocess.txt &
+TASKS+=($!)
+
+echo " => Memory saturation: system-wide scan-rate"
+vmstat 1 11 | awk '{print $12 " " $3}' > ${LOGDIR}/memory-capacity-1systemwide-sr.txt &
+TASKS+=($!)
+
+echo " => Memory saturation: system-wide page-ins/page-outs"
+vmstat 1 11 | awk '{print $12 " " $3}' > ${LOGDIR}/memory-capacity-2systemwide-pageins.txt &
+TASKS+=($!)
+
+echo " => Memory saturation: per process page-ins"
+lib/anonpgpid.d > ${LOGDIR}/memory-saturation-3anonpgpid.txt &
+TASKS+=($!)
+
+echo " => Memory errors: ECC events"
+fmstat -s -m cpumem-retire > ${LOGDIR}/memory-errors-1ecc.txt &
+TASKS+=($!)
+
+
+################################################################################
+# Network interface metrics:
+################################################################################
+function sampleNICThroughput { METRIC=$1; shift; echo "$METRIC:"; unset BEFORE; unset AFTER; declare -A BEFORE; declare -A AFTER; before_code=`dladm show-phys -p -o link | xargs -n 1 dladm show-link -p -o link,$METRIC -s | sed -e 's/^/BEFORE\[\"/' | sed -e 's/:/\"\]=/'`; sleep 10; after_code=`dladm show-phys -p -o link | xargs -n 1 dladm show-link -p -o link,$METRIC -s | sed -e 's/^/AFTER\[\"/' | sed -e 's/:/\"\]=/'`; eval $before_code; eval $after_code; for k in "${!BEFORE[@]}"; do echo $k:$(((AFTER[$k]-BEFORE[$k])/1024/1024/10)) MB/s; done | sort; }
+function sampleNICPackets    { METRIC=$1; shift; echo "$METRIC:"; unset BEFORE; unset AFTER; declare -A BEFORE; declare -A AFTER; before_code=`dladm show-phys -p -o link | xargs -n 1 dladm show-link -p -o link,$METRIC -s | sed -e 's/^/BEFORE\[\"/' | sed -e 's/:/\"\]=/'`; sleep 10; after_code=`dladm show-phys -p -o link | xargs -n 1 dladm show-link -p -o link,$METRIC -s | sed -e 's/^/AFTER\[\"/' | sed -e 's/:/\"\]=/'`; eval $before_code; eval $after_code; for k in "${!BEFORE[@]}"; do echo $k:$(((AFTER[$k]-BEFORE[$k])/10)) Pkt/s; done | sort; }
+
+echo " => Network interfaces: utilization - throughput"
+sampleNICThroughput obytes > ${LOGDIR}/network-utilization-1throughput-upload.txt &
+TASKS+=($!)
+sampleNICThroughput rbytes > ${LOGDIR}/network-utilization-1throughput-download.txt &
+TASKS+=($!)
+
+echo " => Network interfaces: utilization - packets/second"
+sampleNICPackets opackets > ${LOGDIR}/network-utilization-2packets-out.txt &
+TASKS+=($!)
+sampleNICPackets ipackets > ${LOGDIR}/network-utilization-2packets-in.txt &
+TASKS+=($!)
+
+# Does not work on 2.12 due to a bug in kstat
+# echo " => Network interfaces: saturation - no buffer space and deferred"
+# (kstat -p -s '*defer_xmts*' | sort; kstat -p -s '*norcvbuf*'; kstat -p -s '*noxmtbuf*') > ${LOGDIR}/network-saturation-2bufspc-def.txt &
+# TASKS+=($!)
+
+echo " => Network interfaces: saturation - retransmits"
+netstat -s > ${LOGDIR}/network-saturation-1retransmits.txt &
+TASKS+=($!)
+
+echo " => Network interfaces: errors"
+netstat -f inet -i | awk '{print $1 " " $6 " " $8 " " $9 " " $10}' > ${LOGDIR}/network-errors.txt &
+TASKS+=($!)
+
+
+################################################################################
+# Storage device I/O metrics:
+################################################################################
+echo " => Storage device I/O utilization: system-wide"
+iostat -xnz 10 2 | awk '{print $11 " " $10}' | grep -v '^ $' > ${LOGDIR}/storage-device-utilization-1systemwide.txt &
+TASKS+=($!)
+
+echo " => Storage device I/O utilization: per process"
+lib/iotop -C 10 1 > ${LOGDIR}/storage-device-utilization-2perprocess.txt &
+TASKS+=($!)
+
+echo " => Storage device I/O saturation: average I/O queue length"
+iostat -xnz 10 2 | awk '{print $11 " " $10}' | grep -v '^ $' > ${LOGDIR}/storage-device-saturation-2ioqueue.txt &
+TASKS+=($!)
+
+echo " => Storage device I/O saturation: system-wide pending I/O"
+lib/iopending 10 1 2>/dev/null > ${LOGDIR}/storage-device-saturation-3iopending.txt &
+TASKS+=($!)
+
+echo " => Storage device I/O saturation: system-wide SCSI disk queue"
+lib/sdqueue.d 2>/dev/null > ${LOGDIR}/storage-device-saturation-3scsidiskqueue.txt &
+TASKS+=($!)
+
+echo " => Storage device I/O errors: disk errors"
+iostat -En | grep -i errors > ${LOGDIR}/storage-device-errors-1iostat.txt &
+TASKS+=($!)
+
+echo " => Storage device I/O errors: SATA error reasons"
+lib/satareasons.d 2>/dev/null > ${LOGDIR}/storage-device-errors-2satareasons.txt &
+TASKS+=($!)
+
+echo " => Storage device I/O errors: SCSI error reasons"
+lib/scsireasons.d 2>/dev/null > ${LOGDIR}/storage-device-errors-3scsireasons.txt &
+TASKS+=($!)
+
+
+echo -n "Wating for tasks to finish: "
+for task in ${TASKS[@]}; do
+	wait $task
+	echo -n "."
+done
+echo ""
