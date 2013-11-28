@@ -23,9 +23,17 @@
 
 LOGDIR=samples/`date '+%y-%m-%d/%H:%M:%S'`
 mkdir -p $LOGDIR
+LOGDIR=$(readlink -f $LOGDIR)
+INSTALL_DIR=$(dirname `readlink -f $0`)
+
+pushd $INSTALL_DIR >/dev/null 2>&1
+if [ ! -d ./lib/ ]; then
+	echo "ERROR: Unable to find lib dir: $INSTALL_DIR/lib"
+	exit 1
+fi
 
 declare -a TASKS
-
+echo "Gathering use metrics to '${LOGDIR}'."
 echo "Checking dependencies ..."
 if ! pkg info system/header >/dev/null 2>&1; then
 	echo "Installing dependencies ..."
@@ -167,3 +175,5 @@ for task in ${TASKS[@]}; do
 	echo -n "."
 done
 echo ""
+
+popd >/dev/null 2>&1
