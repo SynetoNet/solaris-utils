@@ -7,6 +7,7 @@ PREFIX=/usr/local
 all:
 
 install:
+	ginstall -d -m 755 $(DESTDIR)/$(PREFIX)/
 	cp -a tools $(DESTDIR)/$(PREFIX)/
 	cp -a use-metrics $(DESTDIR)/$(PREFIX)/
 	ginstall -d -m 755 $(DESTDIR)/$(PREFIX)/bin
