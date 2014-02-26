@@ -7,7 +7,7 @@ PREFIX=/usr/local
 all:
 
 install:
-	$(MAKE) -C IPS-tools DESTDIR=`readlink -f $(DESTDIR)` install
+	$(MAKE) -C ips DESTDIR=`readlink -f $(DESTDIR)` install
 	$(MAKE) -C performance DESTDIR=`readlink -f $(DESTDIR)` install
 
 clean:
